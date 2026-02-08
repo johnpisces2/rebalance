@@ -2,7 +2,7 @@
 
 A draggable PySide6/Qt GUI that simulates portfolio growth with periodic rebalancing and visualizes total asset value over time.
 
-![Screenshot](/Users/ppppp/Desktop/python/rebalance/截圖 2026-02-08 晚上9.55.16.png)
+![Screenshot](./截圖 2026-02-08 晚上9.55.16.png)
 
 ## Features
 - Multiple investment methods with individual annual returns and target weights
@@ -25,7 +25,7 @@ Use the same Python you will run the app with.
 
 ## Run
 ```bash
-/opt/homebrew/bin/python3 /Users/ppppp/Desktop/python/rebalance/main.py
+/opt/homebrew/bin/python3 /rebalance/main.py
 ```
 
 ## Usage
@@ -41,5 +41,5 @@ Use the same Python you will run the app with.
 - Rebalancing sets holdings back to target weights on the specified interval.
 
 ## Files
-- `/Users/ppppp/Desktop/python/rebalance/main.py`
-- `/Users/ppppp/Desktop/python/rebalance/README.md`
+- `/rebalance/main.py`
+- `/rebalance/README.md`
