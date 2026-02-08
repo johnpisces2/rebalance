@@ -6,6 +6,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.offsetbox import AnnotationBbox, TextArea, VPacker
 
 
 @dataclass
@@ -19,6 +20,7 @@ def simulate_growth(
     principal: float,
     years: int,
     rebalance_months: int,
+    contribution_per_rebalance: float,
     methods: List[InvestmentMethod],
 ):
     if years <= 0:
@@ -38,6 +40,8 @@ def simulate_growth(
 
     timeline = [0]
     total_values = [principal]
+    total_contributions = [principal]
+    cumulative_contribution = principal
 
     for month in range(1, months + 1):
         # Grow each holding for the month
@@ -45,14 +49,17 @@ def simulate_growth(
             holdings[i] *= (1 + monthly_rates[i])
 
         if rebalance_months > 0 and (month % rebalance_months == 0):
-            total = sum(holdings)
+            added = max(0.0, contribution_per_rebalance)
+            cumulative_contribution += added
+            total = sum(holdings) + added
             for i, m in enumerate(methods):
                 holdings[i] = total * (m.target_weight / 100.0)
 
         timeline.append(month)
         total_values.append(sum(holdings))
+        total_contributions.append(cumulative_contribution)
 
-    return timeline, total_values
+    return timeline, total_values, total_contributions
 
 
 class ChartWidget(QtWidgets.QWidget):
@@ -62,54 +69,86 @@ class ChartWidget(QtWidgets.QWidget):
         self.canvas = FigureCanvas(self.figure)
         self._xs = []
         self._ys = []
+        self._ys_contrib = []
         self._ax = None
-        self._annot = None
+        self._info_box = None
+        self._info_text_main = None
+        self._info_text_total = None
         self._dot = None
+        self._dot_contrib = None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
         self.canvas.mpl_connect("motion_notify_event", self.on_move)
 
-    def plot(self, months, values):
+    def plot(self, months, values, contributions):
         self.figure.clear()
         ax = self.figure.add_subplot(111)
         ax.plot(months, values, color="#1f77b4", linewidth=2)
+        ax.plot(months, contributions, color="#2ecc71", linewidth=2, linestyle="--")
         ax.set_xlabel("Year")
         ax.set_ylabel("Total Asset")
         ax.grid(True, linestyle="--", alpha=0.4)
         self._dot = ax.plot([], [], "o", color="#1f77b4", markersize=5, zorder=5)[0]
-        self._annot = ax.annotate(
+        self._dot_contrib = ax.plot(
+            [], [], "o", color="#2ecc71", markersize=5, zorder=5
+        )[0]
+        self._info_text_main = TextArea(
             "",
-            xy=(0, 0),
-            xytext=(12, 12),
-            textcoords="offset points",
-            bbox=dict(boxstyle="round", fc="#1f2a35", ec="#4a4a4a", alpha=0.9),
-            color="#f2f2f2",
+            textprops=dict(color="#f2f2f2"),
         )
-        self._annot.set_visible(False)
+        self._info_text_total = TextArea(
+            "",
+            textprops=dict(color="#e74c3c"),
+        )
+        packed = VPacker(
+            children=[self._info_text_main, self._info_text_total],
+            align="left",
+            pad=0,
+            sep=2,
+        )
+        self._info_box = AnnotationBbox(
+            packed,
+            (0, 0),
+            xybox=(16, 16),
+            xycoords="data",
+            boxcoords="offset points",
+            frameon=True,
+            bboxprops=dict(boxstyle="round", fc="#1f2a35", ec="#4a4a4a", alpha=1.0),
+        )
+        self._info_box.set_zorder(10)
+        self._info_box.set_visible(False)
+        ax.add_artist(self._info_box)
         self.figure.tight_layout()
         self.canvas.draw()
         self._ax = ax
         self._xs = months
         self._ys = values
+        self._ys_contrib = contributions
 
     def on_move(self, event):
         if self._ax is None or event.inaxes != self._ax or event.xdata is None:
-            if self._annot is not None:
-                self._annot.set_visible(False)
+            if self._info_box is not None:
+                self._info_box.set_visible(False)
             if self._dot is not None:
                 self._dot.set_data([], [])
-                self.canvas.draw_idle()
+            if self._dot_contrib is not None:
+                self._dot_contrib.set_data([], [])
+            self.canvas.draw_idle()
             return
         # Find nearest point for display
         x = event.xdata
         idx = min(range(len(self._xs)), key=lambda i: abs(self._xs[i] - x))
-        if self._annot is not None:
-            self._annot.xy = (self._xs[idx], self._ys[idx])
-            self._annot.set_text(
-                f"Year: {self._xs[idx]:.2f}\nTotal: {self._ys[idx]:.2f}"
-            )
-            self._annot.set_visible(True)
+        if self._info_box is not None:
+            if self._info_text_main is not None:
+                self._info_text_main.set_text(
+                    f"Year: {self._xs[idx]:.2f}\n"
+                    f"Contrib: {self._ys_contrib[idx]:,.2f}"
+                )
+            if self._info_text_total is not None:
+                self._info_text_total.set_text(f"Total: {self._ys[idx]:,.2f}")
+            self._info_box.xy = (self._xs[idx], self._ys[idx])
+            self._info_box.set_visible(True)
             # Choose the quadrant with the least overflow (closest to the point)
             renderer = self.canvas.get_renderer()
             if renderer is not None:
@@ -124,9 +163,8 @@ class ChartWidget(QtWidgets.QWidget):
                 best = None
                 best_overflow = None
                 for ox, oy, ha in candidates:
-                    self._annot.set_position((ox, oy))
-                    self._annot.set_ha(ha)
-                    bbox = self._annot.get_window_extent(renderer=renderer)
+                    self._info_box.xybox = (ox, oy)
+                    bbox = self._info_box.get_window_extent(renderer=renderer)
                     overflow_left = max(0, ax_bbox.x0 - bbox.x0)
                     overflow_right = max(0, bbox.x1 - ax_bbox.x1)
                     overflow_bottom = max(0, ax_bbox.y0 - bbox.y0)
@@ -136,11 +174,14 @@ class ChartWidget(QtWidgets.QWidget):
                         best = (ox, oy, ha)
                         best_overflow = overflow_area
                 if best is not None:
-                    ox, oy, ha = best
-                    self._annot.set_position((ox, oy))
-                    self._annot.set_ha(ha)
+                    ox, oy, _ha = best
+                    self._info_box.xybox = (ox, oy)
             if self._dot is not None:
                 self._dot.set_data([self._xs[idx]], [self._ys[idx]])
+            if self._dot_contrib is not None:
+                self._dot_contrib.set_data(
+                    [self._xs[idx]], [self._ys_contrib[idx]]
+                )
             self.canvas.draw_idle()
 
 
@@ -181,6 +222,7 @@ class RebalanceApp(QtWidgets.QWidget):
         self.input_rebalance = QtWidgets.QSpinBox()
         self.input_rebalance.setRange(1, 120)
         self.input_rebalance.setValue(12)
+        self.input_contribution = QtWidgets.QLineEdit("0")
 
         form_layout.addWidget(QtWidgets.QLabel("Initial Principal"), 0, 0)
         form_layout.addWidget(self.input_principal, 0, 1)
@@ -188,6 +230,8 @@ class RebalanceApp(QtWidgets.QWidget):
         form_layout.addWidget(self.input_years, 1, 1)
         form_layout.addWidget(QtWidgets.QLabel("Rebalance (months)"), 2, 0)
         form_layout.addWidget(self.input_rebalance, 2, 1)
+        form_layout.addWidget(QtWidgets.QLabel("Contribution per Rebalance"), 3, 0)
+        form_layout.addWidget(self.input_contribution, 3, 1)
 
         self.table = QtWidgets.QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Name", "Annual Return %", "Target %"])
@@ -277,6 +321,11 @@ class RebalanceApp(QtWidgets.QWidget):
         except ValueError:
             self.status_label.setText("Initial principal must be numeric.")
             return
+        try:
+            contribution = float(self.input_contribution.text())
+        except ValueError:
+            self.status_label.setText("Contribution per rebalance must be numeric.")
+            return
         years = int(self.input_years.value())
         rebalance_months = int(self.input_rebalance.value())
 
@@ -285,14 +334,16 @@ class RebalanceApp(QtWidgets.QWidget):
             self.status_label.setText(msg)
             return
 
-        months, values = simulate_growth(principal, years, rebalance_months, methods)
+        months, values, contributions = simulate_growth(
+            principal, years, rebalance_months, contribution, methods
+        )
         if months is None:
             self.status_label.setText("Target weights must sum to 100%.")
             return
 
         self.status_label.setText("")
         years_axis = [m / 12.0 for m in months]
-        self.chart.plot(years_axis, values)
+        self.chart.plot(years_axis, values, contributions)
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
