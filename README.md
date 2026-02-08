@@ -2,7 +2,7 @@
 
 A draggable PySide6/Qt GUI that simulates portfolio growth with periodic rebalancing and visualizes total asset value over time.
 
-![Screenshot](./截圖 2026-02-08 晚上9.55.16.png)
+![Screenshot](./screenshot.png)
 
 ## Features
 - Multiple investment methods with individual annual returns and target weights
@@ -20,13 +20,14 @@ A draggable PySide6/Qt GUI that simulates portfolio growth with periodic rebalan
 Use the same Python you will run the app with.
 
 ```bash
-/opt/homebrew/bin/python3 -m pip install PySide6 matplotlib
+python -m pip install PySide6 matplotlib
 ```
 
 ## Run
 ```bash
-/opt/homebrew/bin/python3 /rebalance/main.py
+python main.py
 ```
+Run the command from the project root.
 
 ## Usage
 1. Enter `Initial Principal` (default: 5000).
@@ -41,5 +42,5 @@ Use the same Python you will run the app with.
 - Rebalancing sets holdings back to target weights on the specified interval.
 
 ## Files
-- `/rebalance/main.py`
-- `/rebalance/README.md`
+- `<your-path>/rebalance/main.py`
+- `<your-path>/rebalance/README.md`
