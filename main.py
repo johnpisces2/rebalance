@@ -24,15 +24,15 @@ def simulate_growth(
     methods: List[InvestmentMethod],
 ):
     if years <= 0:
-        return [0], [principal]
+        return [0], [principal], [principal]
 
     months = years * 12
     # Normalize weights if they sum to 100, otherwise return empty to signal invalid input
     weight_sum = sum(m.target_weight for m in methods)
     if weight_sum <= 0:
-        return None, None
+        return None, None, None
     if abs(weight_sum - 100.0) > 0.01:
-        return None, None
+        return None, None, None
 
     # Initialize holdings based on target weights
     holdings = [principal * (m.target_weight / 100.0) for m in methods]
