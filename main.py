@@ -1,5 +1,7 @@
 import sys
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -193,6 +195,7 @@ class RebalanceApp(QtWidgets.QWidget):
         self.resize(980, 620)
 
         self._drag_pos = None
+        self.settings_path = Path(__file__).with_name("rebalance_settings.json")
 
         self.title_bar = QtWidgets.QWidget()
         self.title_bar.setFixedHeight(36)
@@ -240,9 +243,11 @@ class RebalanceApp(QtWidgets.QWidget):
         btn_add = QtWidgets.QPushButton("Add Method")
         btn_remove = QtWidgets.QPushButton("Remove Selected")
         btn_calc = QtWidgets.QPushButton("Calculate")
+        btn_save = QtWidgets.QPushButton("Save Settings")
         btn_add.clicked.connect(self.add_method)
         btn_remove.clicked.connect(self.remove_selected)
         btn_calc.clicked.connect(self.calculate)
+        btn_save.clicked.connect(self.save_settings)
 
         self.status_label = QtWidgets.QLabel("")
         self.status_label.setStyleSheet("color: #c0392b;")
@@ -253,6 +258,7 @@ class RebalanceApp(QtWidgets.QWidget):
         left_layout.addWidget(btn_add)
         left_layout.addWidget(btn_remove)
         left_layout.addWidget(btn_calc)
+        left_layout.addWidget(btn_save)
         left_layout.addWidget(self.status_label)
         left_layout.addStretch()
 
@@ -269,7 +275,8 @@ class RebalanceApp(QtWidgets.QWidget):
         body_layout.addWidget(self.chart, 3)
         main_layout.addWidget(body)
 
-        self.add_default_rows()
+        if not self.load_settings():
+            self.add_default_rows()
         self.calculate()
 
     def add_default_rows(self):
@@ -315,33 +322,126 @@ class RebalanceApp(QtWidgets.QWidget):
             return None, "Please add at least one investment method."
         return methods, ""
 
+    def set_status(self, message, is_error=True):
+        if message:
+            color = "#c0392b" if is_error else "#2ecc71"
+        else:
+            color = "#c0392b"
+        self.status_label.setStyleSheet(f"color: {color};")
+        self.status_label.setText(message)
+
+    def get_current_settings(self):
+        methods = []
+        for row in range(self.table.rowCount()):
+            name_item = self.table.item(row, 0)
+            ret_item = self.table.item(row, 1)
+            weight_item = self.table.item(row, 2)
+            name = name_item.text().strip() if name_item else ""
+            annual_return = ret_item.text().strip() if ret_item else ""
+            target_weight = weight_item.text().strip() if weight_item else ""
+            if name or annual_return or target_weight:
+                methods.append(
+                    {
+                        "name": name,
+                        "annual_return": annual_return,
+                        "target_weight": target_weight,
+                    }
+                )
+
+        return {
+            "principal": self.input_principal.text().strip(),
+            "years": int(self.input_years.value()),
+            "rebalance_months": int(self.input_rebalance.value()),
+            "contribution_per_rebalance": self.input_contribution.text().strip(),
+            "methods": methods,
+        }
+
+    def save_settings(self):
+        settings = self.get_current_settings()
+        try:
+            with self.settings_path.open("w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            self.set_status(f"Failed to save settings: {exc}", is_error=True)
+            return
+        self.set_status(f"Settings saved: {self.settings_path.name}", is_error=False)
+
+    def load_settings(self):
+        if not self.settings_path.exists():
+            return False
+        try:
+            with self.settings_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return False
+
+            principal = data.get("principal")
+            if principal is not None:
+                self.input_principal.setText(str(principal))
+
+            years = data.get("years")
+            if isinstance(years, int):
+                self.input_years.setValue(
+                    max(self.input_years.minimum(), min(years, self.input_years.maximum()))
+                )
+
+            rebalance_months = data.get("rebalance_months")
+            if isinstance(rebalance_months, int):
+                self.input_rebalance.setValue(
+                    max(
+                        self.input_rebalance.minimum(),
+                        min(rebalance_months, self.input_rebalance.maximum()),
+                    )
+                )
+
+            contribution = data.get("contribution_per_rebalance")
+            if contribution is not None:
+                self.input_contribution.setText(str(contribution))
+
+            self.table.setRowCount(0)
+            methods = data.get("methods", [])
+            if isinstance(methods, list):
+                for item in methods:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name", "")).strip()
+                    annual_return = str(item.get("annual_return", "")).strip()
+                    target_weight = str(item.get("target_weight", "")).strip()
+                    if name or annual_return or target_weight:
+                        self.add_row(name, annual_return, target_weight)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            self.set_status(f"Failed to load settings: {exc}", is_error=True)
+            return False
+
+        return self.table.rowCount() > 0
+
     def calculate(self):
         try:
             principal = float(self.input_principal.text())
         except ValueError:
-            self.status_label.setText("Initial principal must be numeric.")
+            self.set_status("Initial principal must be numeric.", is_error=True)
             return
         try:
             contribution = float(self.input_contribution.text())
         except ValueError:
-            self.status_label.setText("Contribution per rebalance must be numeric.")
+            self.set_status("Contribution per rebalance must be numeric.", is_error=True)
             return
         years = int(self.input_years.value())
         rebalance_months = int(self.input_rebalance.value())
 
         methods, msg = self.parse_methods()
         if methods is None:
-            self.status_label.setText(msg)
+            self.set_status(msg, is_error=True)
             return
 
         months, values, contributions = simulate_growth(
             principal, years, rebalance_months, contribution, methods
         )
         if months is None:
-            self.status_label.setText("Target weights must sum to 100%.")
+            self.set_status("Target weights must sum to 100%.", is_error=True)
             return
 
-        self.status_label.setText("")
+        self.set_status("", is_error=False)
         years_axis = [m / 12.0 for m in months]
         self.chart.plot(years_axis, values, contributions)
 
