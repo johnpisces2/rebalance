@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtWidgets
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -193,30 +193,10 @@ class RebalanceApp(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Rebalance Simulator")
-        self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.Window)
         self.resize(980, 620)
 
-        self._drag_pos = None
         self.settings_path = Path(__file__).with_name("rebalance_settings.json")
         self._settings_load_had_error = False
-
-        self.title_bar = QtWidgets.QWidget()
-        self.title_bar.setFixedHeight(36)
-        self.title_bar.setStyleSheet("background-color: #1f2a35;")
-        title_layout = QtWidgets.QHBoxLayout(self.title_bar)
-        title_layout.setContentsMargins(12, 0, 8, 0)
-        title = QtWidgets.QLabel("Rebalance Simulator")
-        title.setStyleSheet("color: #f2f2f2; font-weight: 600;")
-        btn_close = QtWidgets.QPushButton("X")
-        btn_close.setFixedSize(28, 24)
-        btn_close.setStyleSheet(
-            "QPushButton { color: #f2f2f2; background: #c0392b; border: none; border-radius: 4px; }"
-            "QPushButton:hover { background: #e74c3c; }"
-        )
-        btn_close.clicked.connect(self.close)
-        title_layout.addWidget(title)
-        title_layout.addStretch()
-        title_layout.addWidget(btn_close)
 
         form = QtWidgets.QGroupBox("Input")
         form_layout = QtWidgets.QGridLayout(form)
@@ -269,7 +249,6 @@ class RebalanceApp(QtWidgets.QWidget):
 
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(self.title_bar)
 
         body = QtWidgets.QWidget()
         body_layout = QtWidgets.QHBoxLayout(body)
@@ -457,20 +436,6 @@ class RebalanceApp(QtWidgets.QWidget):
             self.set_status("", is_error=False)
         years_axis = [m / 12.0 for m in months]
         self.chart.plot(years_axis, values, contributions)
-
-    def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() == QtCore.Qt.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        self._drag_pos = None
-
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
