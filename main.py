@@ -26,15 +26,17 @@ def simulate_growth(
     methods: List[InvestmentMethod],
 ):
     if years <= 0:
-        return [0], [principal]
+        return [0], [principal], [principal]
 
     months = years * 12
-    # Normalize weights if they sum to 100, otherwise return empty to signal invalid input
+    # Return empty values to signal invalid input.
     weight_sum = sum(m.target_weight for m in methods)
     if weight_sum <= 0:
-        return None, None
+        return None, None, None
     if abs(weight_sum - 100.0) > 0.01:
-        return None, None
+        return None, None, None
+    if any(m.annual_return < -100.0 for m in methods):
+        return None, None, None
 
     # Initialize holdings based on target weights
     holdings = [principal * (m.target_weight / 100.0) for m in methods]
@@ -196,6 +198,7 @@ class RebalanceApp(QtWidgets.QWidget):
 
         self._drag_pos = None
         self.settings_path = Path(__file__).with_name("rebalance_settings.json")
+        self._settings_load_had_error = False
 
         self.title_bar = QtWidgets.QWidget()
         self.title_bar.setFixedHeight(36)
@@ -277,7 +280,7 @@ class RebalanceApp(QtWidgets.QWidget):
 
         if not self.load_settings():
             self.add_default_rows()
-        self.calculate()
+        self.calculate(clear_status_on_success=not self._settings_load_had_error)
 
     def add_default_rows(self):
         self.table.setRowCount(0)
@@ -317,6 +320,8 @@ class RebalanceApp(QtWidgets.QWidget):
                 target_weight = float(weight_item.text())
             except ValueError:
                 return None, "Please enter numeric values for returns and weights."
+            if annual_return < -100.0:
+                return None, "Annual return cannot be less than -100%."
             methods.append(InvestmentMethod(name, annual_return, target_weight))
         if not methods:
             return None, "Please add at least one investment method."
@@ -367,12 +372,15 @@ class RebalanceApp(QtWidgets.QWidget):
         self.set_status(f"Settings saved: {self.settings_path.name}", is_error=False)
 
     def load_settings(self):
+        self._settings_load_had_error = False
         if not self.settings_path.exists():
             return False
         try:
             with self.settings_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
+                self._settings_load_had_error = True
+                self.set_status("Failed to load settings: invalid settings format.", is_error=True)
                 return False
 
             principal = data.get("principal")
@@ -410,12 +418,13 @@ class RebalanceApp(QtWidgets.QWidget):
                     if name or annual_return or target_weight:
                         self.add_row(name, annual_return, target_weight)
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            self._settings_load_had_error = True
             self.set_status(f"Failed to load settings: {exc}", is_error=True)
             return False
 
         return self.table.rowCount() > 0
 
-    def calculate(self):
+    def calculate(self, clear_status_on_success=True):
         try:
             principal = float(self.input_principal.text())
         except ValueError:
@@ -438,10 +447,14 @@ class RebalanceApp(QtWidgets.QWidget):
             principal, years, rebalance_months, contribution, methods
         )
         if months is None:
-            self.set_status("Target weights must sum to 100%.", is_error=True)
+            self.set_status(
+                "Target weights must sum to 100%, and annual return must be >= -100%.",
+                is_error=True,
+            )
             return
 
-        self.set_status("", is_error=False)
+        if clear_status_on_success:
+            self.set_status("", is_error=False)
         years_axis = [m / 12.0 for m in months]
         self.chart.plot(years_axis, values, contributions)
 
